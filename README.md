@@ -32,7 +32,7 @@ cycle_control/
 tests_builtin.py        unittest suite (68 tests)
 tests/
     test_basic.json     example JSON tests (7 tests)
-ui.py                   Tkinter UI (analytical, not pretty)
+ui.py                   Tkinter UI for testing and debugging
 README.md               this file
 ```
 
@@ -137,5 +137,5 @@ The UI is built with Tkinter and is meant for testing/debugging rather than visu
 
 ## Known limitations
 1. Sandbox + undo: the initial state is re-derived from `initial_state()`, so any sandbox edits made before a sequence of normal moves will NOT survive `undo()`. Use sandbox for position setup, then don't expect undo to preserve it.
-2. Pathological rules combinations (e.g. supply enabled, pass disabled, `end_on_all_stones_placed` disabled, `end_on_board_full` disabled if unreachable on a small board) are not detected at config time — the game will simply stall. Existing validation catches the common unreachable combinations specified in v5.
+2. Some unusual rule combinations (e.g. supply enabled, pass disabled, `end_on_all_stones_placed` disabled, `end_on_board_full` disabled if unreachable on a small board) are not detected at config time — the game will simply stall. Existing validation catches the common unreachable combinations Existing validation catches the common unreachable combinations.
 3. Girth check in `BoardTopology` is `O(V * (V+E))`; on very large boards (radius 15+) construction is slow. It's a one-time construction cost.
