@@ -1,18 +1,18 @@
-# Cycle Control (Graph Version) — Research Prototype
+# Cycle Control — Research Prototype
 
-Deterministic research engine for the Cycle Control two-player abstract strategy game.
+Playable graph-based two-player strategy game prototype with cycle scoring, bots, ELO, tournament simulation, and tests.
 
 ## Why this is interesting
+The goal of this project is to test whether Cycle Control works as a real strategy game, not just as a rules idea.
 
-This project is not just a playable game prototype. It is a deterministic rule engine for testing a new abstract strategy game, including graph-based scoring, AI hooks, ELO evaluation, tournament simulation, persistence, and automated tests.
+To make that possible, the project includes a deterministic rules engine, graph-based scoring, undo/redo, sandbox editing, JSON tests, AI hooks, ELO evaluation, and tournament simulation.
 
-The main technical focus is making the game rules precise, testable, and suitable for bot-vs-bot experimentation.
+The main technical challenge is turning a board-game idea into precise code that can be tested, simulated, and used by bots.
 
 ## Game summary
 Two players (Black, White) place stones on triangular cells of a hex-shaped board region. A stone scores for its owner iff the triangle it occupies belongs to at least one simple cycle in that player's induced subgraph (adjacent same-color stones). The player with more scoring nodes at game end wins.
 
 ## Screenshot
-
 ![Cycle Control Game screenshot](screenshots/early_game.png)
 
 ## Layout
@@ -128,7 +128,7 @@ Assertions: `assert_score`, `assert_active_player`, `assert_turn_phase`, `assert
 Unknown commands cause the test to FAIL AND STOP.
 
 ## UI
-Tkinter-based. Analytical, not aesthetic:
+The UI is built with Tkinter and is meant for testing/debugging rather than visual polish:
 - Left-click: place stone (normal) or cycle empty → Black → White → empty (sandbox)
 - Right-click (sandbox mode only): force empty
 - Toggles: sandbox mode, highlight scoring nodes, show (q, r, o) coords
