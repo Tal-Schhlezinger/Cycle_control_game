@@ -1,13 +1,19 @@
 # Cycle Control (Graph Version) — Research Prototype
 
-Deterministic research engine for the Cycle Control two-player abstract strategy game, implemented per AI_BUILD_CHECKLIST v5.
+Deterministic research engine for the Cycle Control two-player abstract strategy game.
+
+## Why this is interesting
+
+This project is not just a playable game prototype. It is a deterministic rule engine for testing a new abstract strategy game, including graph-based scoring, AI hooks, ELO evaluation, tournament simulation, persistence, and automated tests.
+
+The main technical focus is making the game rules precise, testable, and suitable for bot-vs-bot experimentation.
 
 ## Game summary
 Two players (Black, White) place stones on triangular cells of a hex-shaped board region. A stone scores for its owner iff the triangle it occupies belongs to at least one simple cycle in that player's induced subgraph (adjacent same-color stones). The player with more scoring nodes at game end wins.
 
 ## Screenshot
 
-![Cycle Control Game screenshot](screenshots/early game.png)
+![Cycle Control Game screenshot](screenshots/early_game.png)
 
 ## Layout
 ```
