@@ -5,6 +5,10 @@ Deterministic research engine for the Cycle Control two-player abstract strategy
 ## Game summary
 Two players (Black, White) place stones on triangular cells of a hex-shaped board region. A stone scores for its owner iff the triangle it occupies belongs to at least one simple cycle in that player's induced subgraph (adjacent same-color stones). The player with more scoring nodes at game end wins.
 
+## Screenshot
+
+![Cycle Control Game screenshot](screenshots/early game.png)
+
 ## Layout
 ```
 cycle_control/
