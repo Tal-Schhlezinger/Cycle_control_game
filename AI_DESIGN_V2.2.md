@@ -1,0 +1,1144 @@
+# Cycle Control — AI Design V2.2
+
+**Status:** design, pre-implementation.  
+**Purpose:** define the AI research and implementation plan for evaluating whether the committed Cycle Control ruleset produces a strategically good two-player game under competent play.
+
+---
+
+## Changelog: V2 → V2.1 → V2.1.1 → V2.2
+
+V2.1 made the following targeted corrections to V2:
+
+1. Section 0 updated to reflect V2.1 lineage.
+2. Section 3.2 PBT bullet clarified.
+3. Section 7.2 priority note added for engine upgrade ordering.
+4. Section 13.3 restored reward-shaping diversity as a conditional Phase 3 escalation. V2 ruled it out; V2.1 ruled it in as a late conditional after hyperparameter-only PBT.
+5. Sections 16.3, 16.4 added two missing risks.
+6. Section 17 Phase F updated.
+
+**V2.1.1 makes one additional structural change to V2.1:**
+
+7. **Section 13 — reward-shaping diversity promoted from Phase 3 conditional to Phase 1 structural feature.**
+
+   V2.1 positioned reward-shaping diversity as a late escalation within PBT. That was still too conservative. The correct framing: each agent in the population trains on a *consistent but agent-specific* reward mix from the very start of Phase 1. This is not a PBT mechanism — there is no weight copying, no tournament selection, no perturbation. Each agent develops genuine strategy around its own objective. The diversity comes from population composition, not from within-agent mutation. When reward-diverse agents face each other in the opponent pool, they encounter tactically different opponents, which forces broader learning than pure self-play produces. Phase 3 is updated accordingly: shaping diversity is already built in, so Phase 3 Step 1 is hyperparameter-only PBT, and Step 2 (shaping mutation) is a late diagnostic tool for collapse that should not occur given Phase 1 diversity.
+
+---
+
+## 0. Why this V2.1.1 exists
+
+V2.1.1 is a targeted correction to V2.1, which was itself a correction to V2.
+
+V2.1 fixed one overcorrection in V2: it restored reward-shaping diversity as a conditional Phase 3 escalation path after hyperparameter-only PBT. That was the right direction but the wrong position in the pipeline.
+
+V2.1.1 corrects the positioning: **reward-shaping diversity belongs in Phase 1, not Phase 3.**
+
+The key insight: each agent should train on a consistent but agent-specific reward mix from the start. This is not a perturbation mechanism — it is diversity by design. Agents with different internal reward profiles develop different strategies. When they face each other in the opponent pool, each agent encounters tactically varied opponents, which forces broader learning than pure self-play across identical agents ever produces. Phase 3 retains hyperparameter PBT and a late shaping-mutation step, but those are now diagnostic tools for failure, not the primary diversity mechanism.
+
+Everything else in V2.1 stands.
+
+**V2.2 adds one structural extension:**
+
+8. **Section 13 and new Section 13.0 — Combinatorial population design.**
+
+   V2.1.1 established reward-shaping diversity as a Phase 1 structural feature. V2.2 extends this into a full combinatorial population design across three high-behavioral-impact axes: architecture (CNN / GNN), greedy bootstrap variant (Greedy_1 / Greedy_2), and reward shaping profile (R0..R3). Hyperparameters are sampled randomly per agent rather than enumerated as a discrete axis, since they affect convergence speed more than final strategy.
+
+   This produces a population of `2 × 2 × 4 = 16` agents with genuine multi-axis behavioral diversity. Each combination trains independently and consistently on its own configuration.
+
+   A new Section 8.2 replaces the single GreedyBot with two explicitly different greedy variants that must be validated to play observably differently before the population grid is committed.
+
+---
+
+## 1. Core research goal
+
+Determine whether the committed ruleset produces a strategically good two-player game under strong play.
+
+### 1.1 Primary research questions
+
+1. Does the committed ruleset support balanced outcomes under competent play?
+2. Does it support more than one viable strategic style?
+3. Do stronger agents make the game look richer or more degenerate?
+4. Which AI architecture is a better fit for this game:
+   - graph-native (GNN)
+   - grid-like baseline (CNN)
+
+### 1.2 Non-goals
+
+- building a superhuman agent for its own sake
+- maximizing benchmark score at any cost
+- using RL as a substitute for understanding the game
+- training across many rule variants at once before one variant is understood
+
+---
+
+## 2. Committed ruleset
+
+Train and evaluate on one committed configuration:
+
+```text
+mirror_adjacency      = True
+strict_adjacency_rule = True
+neutrality_rule       = True
+partial_credit_k      = 0
+```
+
+### 2.1 Why commit to one ruleset
+
+This preserves a good idea from V1.
+
+Reasons:
+1. Not all rule combinations are likely playable or interesting.
+2. Learned value functions are ruleset-specific.
+3. Early multi-variant training muddies the research question.
+4. The chosen ruleset is already the strongest candidate based on current reasoning.
+
+### 2.2 But do not commit to one board size initially
+
+V1 leaned too quickly toward radius 10 as the training target.
+
+V2 uses a size curriculum:
+
+- `R=4` or `R=5` for debugging and early search analysis
+- `R=6` or `R=7` for first learning runs
+- `R=10` only after the pipeline is proven
+
+---
+
+## 3. High-level philosophy shift from V1
+
+### 3.1 V1 emphasis
+- define RL env early
+- use CNN-style observation as the default
+- include siege/interior channels directly
+- proceed from Greedy -> PPO -> optional PBT
+
+### 3.2 V2.1 emphasis
+- optimize engine for AI first
+- build search baselines before neural learning
+- treat GNN as a serious main candidate, not an afterthought
+- treat CNN as a baseline comparison model
+- use heterogeneous opponent pools later for robustness
+- keep PBT optional and late; use hyperparameter variation first, reward-shaping diversity only if the population still collapses afterward
+- separate **game evaluation** from **agent training**
+
+This is the central structural difference between V1 and V2.
+
+---
+
+## 4. What V1 got right and is kept in V2
+
+The following V1 decisions remain valid and are kept.
+
+### 4.1 Unified bot interface
+
+Keep a single bot protocol usable by:
+- Random bots
+- Greedy bots
+- Search bots
+- PPO agents
+- future MCTS / AlphaZero-style agents
+
+Recommended interface:
+
+```python
+class Bot(Protocol):
+    def choose_action(
+        self,
+        state: GameState,
+        legal_mask: np.ndarray,
+        color: Player,
+    ) -> int:
+        ...
+
+    def reset(self, seed: int | None = None) -> None:
+        ...
+```
+
+### 4.2 Single placement per action call
+
+Keep V1's decomposition.
+
+Do **not** use full-turn actions of the form `(node1, node2_or_pass)` as the main action representation.  
+That would inflate the action space unnecessarily.
+
+The engine or environment should continue to drive the multi-placement turn loop.
+
+### 4.3 Dedicated pass action
+
+Keep a dedicated pass index in the action space.
+
+### 4.4 Action masking
+
+Keep invalid action masking.  
+This remains necessary because the legal action set is a small subset of the full node set for much of the game.
+
+### 4.5 Greedy baseline before RL
+
+Keep this requirement.
+
+### 4.6 Snapshot opponent pool
+
+Keep the idea of training against:
+- recent self snapshots
+- older self snapshots
+- fixed heuristic/search anchors
+
+This remains correct and important.
+
+---
+
+## 5. What was missing from V1 and is added in V2
+
+These were the major structural omissions in V1.
+
+### 5.1 Engine-for-AI optimization phase
+
+V1 treated the engine mostly as already-good-enough.  
+That is false for search and large-scale training.
+
+V2 adds a dedicated engine-preparation phase:
+- frontier-based legality
+- cached neighbor counts
+- cheap simulation state
+- state hashing
+- symmetry transforms
+
+### 5.2 Search-before-learning stage
+
+V1 went from heuristic baseline to PPO too quickly.
+
+V2 adds a mandatory search stage:
+- shallow search / beam / MCTS-like baseline
+- small-board analysis before RL conclusions
+
+### 5.3 Explicit GNN path
+
+V1 structurally centered CNN-style observations.  
+V2 explicitly treats GNN as a first-class model family.
+
+### 5.4 Cleaner distinction between agent metrics and game metrics
+
+V1 mixed:
+- "the model got stronger"
+with
+- "the game is balanced"
+
+V2 separates:
+- agent benchmarking
+- research conclusions about the rules
+
+### 5.5 Heterogeneous-opponent training
+
+V1 had solo self-play and optional PBT.  
+V2 adds a clearer intermediate phase:
+- CNN and GNN do not directly imitate each other
+- they appear in each other's opponent pools
+- this is treated as opponent diversity, not magical cross-teaching
+
+---
+
+## 6. What V1 had that V2 must preserve explicitly
+
+These V1 elements should not be lost.
+
+### 6.1 Clear engine-driven multi-placement turn loop
+
+V1 described this well. Keep the idea even if the exact code changes.
+
+The bot should choose one action at a time.  
+The environment should decide whether another placement remains.
+
+### 6.2 Rule commitment rationale
+
+V1 made a good case for training on one ruleset instead of all combinations.  
+V2 preserves that logic.
+
+### 6.3 Elo / ladder evaluation
+
+Keep a ladder or league rating system.  
+Do not rely only on training reward curves.
+
+### 6.4 Open research risks section
+
+V1 explicitly listed uncertainties.  
+V2 should keep an uncertainty/risk section rather than pretending confidence is perfect.
+
+### 6.5 Implementation order discipline
+
+V1 had good instincts here.  
+V2 keeps staged implementation gates, but changes their order.
+
+---
+
+## 7. Engine work required before serious AI
+
+This is the first major implementation block.
+
+### 7.1 Goals
+
+The engine currently appears suitable for correctness, testing, and gameplay.  
+It is not yet optimized enough for:
+- heavy bot rollouts
+- large search trees
+- efficient self-play
+
+### 7.2 Required upgrades
+
+**Priority note:** A and B are immediate wins — cheap to implement, high impact on every downstream stage. Implement them first. C is needed before serious RL training. D and E can follow once C is in place; they are needed for transposition tables, augmentation, and search caching but not for first learning runs.
+
+#### A. Incremental legal frontier
+
+Do not compute legal moves by scanning every node every time.
+
+Maintain, per player:
+- whether the player has any stones
+- frontier candidate empty nodes adjacent to own stones
+- opening-state special handling
+
+Under strict adjacency, legal moves after the opening are fundamentally frontier-based.
+
+#### B. Cached local neighbor counts
+
+Maintain per-node counts:
+- black neighbors
+- white neighbors
+
+Update them incrementally after each move.
+
+This speeds up:
+- neutrality checks
+- legality checks
+- heuristic evaluation
+
+#### C. Cheap simulation state
+
+Separate:
+- UI / replay / history state
+from
+- lightweight bot simulation state
+
+Simulation state should clone fast and avoid unnecessary baggage.
+
+#### D. State hashing
+
+Add deterministic state hashing over:
+- board occupancy
+- player-to-move
+- turn phase
+- any pass / truncation state that matters to legality or terminal logic
+
+Use cases:
+- transposition tables
+- repeated-state detection
+- dataset deduplication
+- search caching
+- benchmark position sets
+
+#### E. Symmetry utilities
+
+Implement board symmetries once:
+- rotations
+- reflections
+- node-index transforms
+- policy-target transforms
+- optional canonicalization helpers
+
+This is needed for:
+- augmentation
+- analysis
+- opening grouping
+- debugging equivalent states
+
+### 7.3 Optional but desirable engine additions
+
+- transposition table support
+- incremental feature extraction hooks
+- canonical opening position library
+- performance benchmark scripts
+
+---
+
+## 8. Bot stack and implementation order
+
+Bots should be built in increasing sophistication, with each stage producing usable evaluation tools.
+
+### 8.1 Stage 0 — trivial sanity bots
+
+Implement:
+- `RandomBot`
+- `LegalFirstBot`
+- `FrontierRandomBot`
+
+Purpose:
+- validate legality
+- validate action encoding
+- validate turn-phase handling
+- provide smoke-test opponents
+
+### 8.2 Stage 1 — heuristic bots
+
+#### 8.2.1 Two greedy variants (Greedy_1 and Greedy_2)
+
+Implement **two explicitly different** greedy bots, not one canonical GreedyBot. These serve as:
+- bootstrap opponents for neural agents (different priors baked in from early training)
+- a diversity-validation check (they must play observably differently before the population grid is committed)
+- independent benchmark anchors
+
+**Greedy_1 — cycle and structure focused:**
+
+Evaluation components:
+- own cycle/scoring nodes minus opponent cycle/scoring nodes (heavy weight)
+- largest connected component size (moderate weight)
+- mobility / legal options count (light weight)
+- territory/siege estimate (zero or minimal weight)
+
+Strategy character: short-term cycle-builder. Prioritizes closing cycles quickly over spatial control.
+
+**Greedy_2 — territory and frontier focused:**
+
+Evaluation components:
+- territory / siege estimate — reachable empty cells minus opponent-reachable empty cells (heavy weight)
+- frontier size — own expandable border cells (moderate weight)
+- opponent mobility penalty — negative weight on opponent's legal moves
+- cycle/scoring nodes (light weight, as a secondary tiebreaker only)
+
+Strategy character: spatial controller. Prioritizes area ownership and opponent restriction over immediate cycle scoring.
+
+**Validation requirement before committing the population grid:**
+Run Greedy_1 vs Greedy_2 head-to-head on the committed board size. If they play indistinguishably (similar opening patterns, similar mid-game positions, similar score distributions), the axis is not providing real diversity — collapse to one greedy and remove the greedy axis from the combinatorial grid. Only proceed with both variants if they produce observably different games.
+
+#### 8.2.2 SearchBot
+
+Before RL, add a stronger classical baseline:
+- beam search, or
+- depth-limited search, or
+- lightweight MCTS with heuristic leaf eval
+
+This is a structural addition absent from V1 and is mandatory.
+
+Reason:
+If the game already reveals rich tactics under shallow search, that is evidence about the game itself and may reduce the need for early RL complexity.
+
+---
+
+## 9. Territory / siege heuristics in V2
+
+V1 made siege/interior analysis central very early.  
+That needs correction.
+
+### 9.1 Keep territory logic as a heuristic tool
+
+A territory / siege estimator is still valuable for:
+- GreedyBot eval
+- SearchBot eval
+- post-game analysis
+- research metrics
+
+### 9.2 Do not make siege channels a required first observation feature
+
+First learned models should **not** depend on handcrafted siege planes.
+
+Reason:
+- this bakes in one theory of the game too early
+- this risks making the model imitate the heuristic rather than discover structure
+- this weakens the interpretability of conclusions about what the model really learned
+
+### 9.3 Recommended use of siege logic
+
+Use it in this order:
+1. heuristic/search evaluation
+2. offline analysis
+3. optional ablation features later
+4. optional auxiliary prediction target later
+
+Do not make it a default mandatory input in the first neural models.
+
+---
+
+## 10. Search before learning
+
+This is one of the main V2 changes.
+
+### 10.1 Small-board exact / near-exact study
+
+Before drawing conclusions from RL, study small boards where search is more feasible.
+
+Recommended sizes:
+- `R=3`
+- `R=4`
+- maybe `R=5` with budgeted search
+
+Measure:
+- first-player win rate
+- draw rate
+- final score margins
+- opening sensitivity
+- forced-win / forced-draw signs
+- parity/pathology indicators
+
+If the rules are structurally broken on small boards, large-board RL may merely hide the problem.
+
+### 10.2 Mid-board search study
+
+For `R=5` to `R=7`, run many games:
+- Greedy vs Greedy
+- Search vs Search
+- Greedy vs Search
+- randomized openings if useful
+
+Goal:
+- observe whether multiple strategic styles emerge
+- test whether siege pressure is real or overstated
+- construct benchmark position sets for later learned-agent evaluation
+
+---
+
+## 11. Learning architectures
+
+V2 supports two learner families, but not simultaneously at the start.
+
+### 11.1 Learner A — GNN (main serious candidate)
+
+This is the architecture V2 considers the more natural fit.
+
+#### 11.1.1 Why GNN is the serious model
+
+The game is fundamentally a graph:
+- cycle structure
+- connectivity
+- local-global relational effects
+- changing tactical importance of edges and neighborhoods
+
+A graph-native model matches the object more naturally than a padded image representation.
+
+#### 11.1.2 Node features
+
+Suggested node-level features:
+- own stone
+- opponent stone
+- empty
+- on-board / valid node flag
+- local own-neighbor count
+- local opponent-neighbor count
+- normalized move number or game-progress signal
+- turn-phase indicators
+- active-player indicator
+
+Additional optional features may be added later only if clearly justified.
+
+#### 11.1.3 Edge set
+
+Use the real game adjacency graph, including:
+- standard adjacency
+- mirror adjacency if enabled by the committed ruleset
+
+#### 11.1.4 Outputs
+
+- one policy logit per node
+- one extra pass logit
+- one scalar value head
+
+### 11.2 Learner B — CNN baseline
+
+Keep a CNN path, but treat it as a comparison baseline rather than the presumed best model.
+
+#### 11.2.1 Purpose
+- test whether graph inductive bias matters materially
+- measure how far local pattern learning alone gets
+- provide a simpler baseline for tooling and debugging
+
+#### 11.2.2 Input
+Use a padded board representation with channels such as:
+- own stones
+- opponent stones
+- empty/on-board
+- optional neighbor count channels
+- phase / active-player broadcast planes
+
+But do **not** hardcode siege/interior channels as required inputs in the first version.
+
+### 11.3 Architecture order
+
+Implement in this order:
+1. GNN first
+2. CNN second
+
+Reason:
+- GNN is the architecture more likely to match the game
+- CNN remains useful as an empirical comparison and debugging baseline
+
+---
+
+## 12. Environment and action space design
+
+This section preserves the strongest structural choices from V1.
+
+### 12.1 Action space
+
+Let `N = topology.node_count()`.
+
+Use:
+
+```text
+0 .. N-1   = place at node i
+N          = pass
+```
+
+Policy output size = `N + 1`.
+
+### 12.2 Action selection granularity
+
+One action corresponds to one placement or pass.
+
+The environment/engine drives the sequence of placements in a turn.
+
+### 12.3 Masked legality
+
+The environment must produce:
+- observation
+- legal action mask
+
+Masked policies must not sample illegal moves.
+
+### 12.4 Environment style
+
+AEC-style turn stepping remains reasonable because the game is sequential and multi-phase.  
+However, V2 is less dogmatic about framework than V1.
+
+The important constraint is not PettingZoo specifically.  
+The important constraint is:
+- correct multi-placement stepping
+- clean legal masks
+- easy self-play orchestration
+- evaluation reproducibility
+
+PettingZoo AEC remains acceptable if implementation friction stays low.
+
+---
+
+## 13. Training phases
+
+### 13.0 Combinatorial population design
+
+#### The three high-behavioral-impact axes
+
+The training population is defined by a combinatorial product of three axes, each expected to produce genuine behavioral differences between agents:
+
+```
+Architecture    × Greedy bootstrap × Reward shaping
+{CNN, GNN}      × {G1, G2}         × {R0, R1, R2, R3}
+= 2 × 2 × 4 = 16 agents total
+```
+
+Each combination is a distinct agent that trains independently and consistently on its own full configuration.
+
+| Axis | Options | Expected behavioral impact |
+|---|---|---|
+| Architecture | CNN, GNN | Different inductive biases — CNN learns local patterns, GNN learns graph-relational structure |
+| Greedy bootstrap | G1 (cycle-focused), G2 (territory-focused) | Different early priors — agents enter RL with different heuristic intuitions baked in |
+| Reward shaping | R0..R3 (see below) | Different internal objectives — agents learn to value different intermediate positions |
+
+#### Hyperparameters: random sampling, not a discrete axis
+
+Hyperparameters (learning rate, entropy coefficient, clip range, GAE lambda) are **not** a combinatorial axis. They are sampled randomly per agent from a reasonable range at initialization. Hyperparameters affect convergence speed more than final strategy, so enumerating them as a discrete factor produces population variance rather than behavioral diversity.
+
+Each agent therefore has: `(architecture, greedy_bootstrap, reward_shaping, random_hp_sample)`.
+
+#### Why this structure over other alternatives
+
+- **Single-axis variation** (e.g. reward shaping only) leaves all agents with identical architecture and bootstrap priors, which limits how different their learned strategies can be.
+- **Full 2×2×2×n grid including hyperparameters** produces combinatorial explosion with diminishing behavioral returns on the hyperparameter axis.
+- **2×2×4 with random HP** gives 16 agents with genuine multi-axis diversity and manageable compute cost (one agent per GPU is feasible on a 4-GPU setup for early runs).
+
+#### Validation gate before committing the full grid
+
+Before running the full 16-agent population, validate that each axis provides real diversity:
+
+1. **Greedy validation:** run G1 vs G2 head-to-head. If games are observably similar, collapse to one greedy variant and remove that axis (reducing to 8 agents).
+2. **Reward shaping validation:** verify that R0..R3 agents produce observably different play after a short training run. If two profiles are indistinguishable, merge them.
+3. **Architecture validation:** this axis is assumed valid a priori (CNN vs GNN is a structural difference). Still verify that both families train stably before committing to the full grid.
+
+If both G and R axes pass validation, proceed with 16 agents. If one axis collapses, reduce accordingly.
+
+#### Scaling for compute budget
+
+| Budget | Recommended population |
+|---|---|
+| 4 GPUs (minimum) | 4 agents — one per GPU, varied across all three axes |
+| 8 GPUs | 8 agents — sample from the 16-agent grid |
+| 16+ GPUs | Full 16-agent grid |
+
+For 4-GPU runs: pick 4 agents that maximize axis coverage, e.g. `(CNN,G1,R0)`, `(CNN,G2,R2)`, `(GNN,G1,R3)`, `(GNN,G2,R1)`. Do not run 4 agents with the same architecture.
+
+### 13.1 Phase 1 — single-architecture training with reward-shaping diversity
+
+Train one learner family at a time.
+
+Recommended order:
+1. GNN
+2. CNN
+
+#### Core mechanism: reward-shaping diversity built in from the start
+
+Each agent in the population trains on a **consistent internal reward** throughout its lifetime. The reward mix differs across agents. This is not a perturbation mechanism — each agent develops genuine strategy around its own objective. When agents face each other, they encounter opponents with different tactical priorities, which forces broader strategic learning than pure self-play produces.
+
+This is different from PBT-style reward mutation. There is no exploit/explore cycle between agents, no copying weights, no tournament selection. Each agent simply trains independently on its own consistent objective. The diversity is in the *population composition*, not in any one agent's training loop.
+
+**Why this belongs in Phase 1, not Phase 3:**
+The goal is to produce agents with genuinely different strategies from the start, so that when they meet in the opponent pool and in Phase 2, they are already diverse. Waiting until Phase 3 to introduce diversity means spending Phases 1 and 2 with agents that have all converged to the same style — which produces weak cross-training signal.
+
+#### Reward shaping design
+
+Each agent has a fixed internal reward vector `(w_cycle, w_territory, w_mobility)` applied as an auxiliary training signal on top of the terminal win/loss reward. The terminal reward is always the true objective and the primary training signal. The shaping terms influence the value head's intermediate targets, not the final evaluation.
+
+Suggested starting population (per architecture family, typically 3–4 agents):
+
+```
+agent_0: cycle-focused     w_cycle=3.0, w_territory=0.5, w_mobility=0.05
+agent_1: territory-focused w_cycle=1.0, w_territory=2.5, w_mobility=0.1
+agent_2: balanced          w_cycle=2.0, w_territory=1.5, w_mobility=0.1
+agent_3: mobility-focused  w_cycle=1.5, w_territory=1.0, w_mobility=0.5
+```
+
+All agents still win by terminal score. The shaping only affects which intermediate positions the agent learns to value internally. Fitness for research purposes is always measured by win rate, not by internal shaped reward.
+
+**Research output:** surviving strategy profiles (which agents develop strong play) tell us which internal priorities correspond to winning strategies under the committed ruleset. This is a meaningful game-design signal, not just a training trick.
+
+#### Opponent sampling per agent
+
+Each agent's opponent pool is drawn from the full combinatorial population, not just its own snapshots. Every agent faces opponents that differ on at least one of: architecture, greedy bootstrap, reward shaping.
+
+- ~40% recent snapshots from the same agent
+- ~30% snapshots from other agents in the population (cross-axis exposure — different architecture, bootstrap, or shaping)
+- ~10% older own snapshots (anti-forgetting)
+- ~20% fixed heuristic/search anchors (G1 and G2 both included)
+
+This means every agent faces structurally diverse opponents during training. The diversity spans multiple axes simultaneously, not just reward shaping.
+
+### 13.2 Phase 2 — heterogeneous opponent pool
+
+Only after both architecture families have trained independently.
+
+Then train with cross-architecture opponent diversity:
+- GNN agents sometimes face CNN agent snapshots
+- CNN agents sometimes face GNN agent snapshots
+- both still face own-family snapshots and the reward-diverse population
+- both still face search/heuristic anchors
+
+This is the disciplined version of "teach each other."
+
+Interpretation:
+- not direct policy imitation
+- not magical mutual instruction
+- richer opponent diversity, now spanning both architecture families and reward-shaping profiles
+
+### 13.3 Phase 3 — optional advanced population methods
+
+Only consider if Phase 2 has run and strategy diversity is still insufficient.
+
+#### Step 1: hyperparameter-only PBT
+
+If Phase 3 is triggered, add hyperparameter variation across the population:
+- learning rate, entropy coefficient, clip range, GAE lambda
+- use exploit/explore cycles: copy weights from stronger agents, perturb hyperparameters
+- keep reward shaping weights consistent within each agent (do not perturb them — shaping is structural, not a hyperparameter)
+- keep the true terminal objective fixed
+
+#### Step 2: reward-shaping mutation (late escalation only)
+
+If Step 1 runs and the population still collapses to a single strategic family despite Phase 1 diversity, allow small perturbations to shaping weights within the PBT exploit/explore cycle.
+
+This should be rare. Phase 1 already built in structural shaping diversity. If the population collapsed despite that, the issue is likely elsewhere (training instability, masking bugs, degenerate game dynamics) and should be diagnosed before adding more complexity.
+
+Do not treat Phase 3 Step 2 as a routine escalation. It is a late diagnostic tool.
+
+---
+
+## 14. RL algorithm choices
+
+### 14.1 First practical learner
+
+Masked PPO is acceptable as the first learning baseline.
+
+Why:
+- straightforward
+- good enough to test whether the game can be learned at all
+- works well with a fixed action head and masks
+
+### 14.2 But PPO is not sacred
+
+This is important.
+
+For deterministic, perfect-information board games, stronger long-term directions may include:
+- search-guided training
+- AlphaZero-style self-play
+- MCTS + network hybrids
+
+V2 therefore treats PPO as:
+- useful first learner
+- not necessarily final learner
+
+### 14.3 Search-guided future path
+
+If learning works but plateaus or looks strategically shallow, the next serious upgrade path is:
+- network-guided search
+- or search-improved targets
+
+This path is more natural for the domain than immediately escalating to PBT.
+
+---
+
+## 15. Evaluation framework
+
+V2 strengthens this area.
+
+### 15.1 Agent metrics
+
+Track:
+- Elo / league rating
+- head-to-head win rates
+- win rates by color
+- score margin
+- game length
+- draw rate
+- benchmark-position move quality
+
+### 15.2 Game research metrics
+
+The main outputs about the rules should be:
+
+1. **First-player edge**
+   - Is Black close to 50-55%, or much stronger/weaker?
+
+2. **Draw frequency**
+   - Are draws rare, moderate, or dominant?
+
+3. **Score margin profile**
+   - Are games knife-edge, moderate, or runaway?
+
+4. **Strategic diversity**
+   - Do multiple strategic styles remain viable under strong play?
+
+5. **Cross-opponent robustness**
+   - Does one dominant style crush everything, or do different approaches remain competitive?
+
+6. **Trajectory diversity**
+   - Are strong self-play games varied, or repetitive and degenerate?
+
+### 15.3 Fixed benchmark pool
+
+Maintain a persistent benchmark pool including:
+- RandomBot
+- LegalFirstBot / FrontierRandomBot
+- GreedyBot
+- SearchBot
+- frozen GNN checkpoints
+- frozen CNN checkpoints
+- curated benchmark positions
+
+Without this, training curves become hard to trust.
+
+---
+
+## 16. Open research risks and uncertainties
+
+V1 was right to include a risks section.  
+V2 keeps one, but updates the contents.
+
+### 16.1 Rule risks
+- mirror adjacency may create hidden structural pathologies
+- first-player edge may become too large
+- small-board behavior may differ materially from large-board behavior
+
+### 16.2 Heuristic risks
+- territory/siege intuition may be overstated
+- Greedy/SearchBot eval may bias conclusions if treated as truth
+
+### 16.3 Model risks
+- GNN may underperform in practice despite being conceptually better-matched
+- CNN may overfit local motifs and miss deeper graph structure
+- either architecture may look stronger only because opponent diversity is poor
+- if reward-shaping diversity is used in Phase 3, surviving shaping weights reflect the game's strategic structure only if the training signal is clean — noisy self-play may produce misleading shaping convergence
+
+### 16.4 Training risks
+- co-adaptation in self-play
+- policy collapse into one strategic family
+- learning a weird internal metagame that does not reflect the real game
+- masking bugs producing misleading results
+- small-board curriculum not transferring as well as expected
+- search-depth sensitivity: SearchBot eval quality depends heavily on depth budget; conclusions about the game from shallow search may not generalize to deeper search or RL
+
+### 16.5 Research-validity risk
+A stronger agent is not automatically evidence of a better game.  
+The real question is what strong-vs-strong play looks like.
+
+---
+
+## 17. Implementation roadmap
+
+This is the implementation order V2 recommends.
+
+### Phase A — engine and AI foundations
+1. frontier-based legality
+2. cached neighbor counts
+3. cheap simulation state
+4. state hashing
+5. symmetry utilities
+
+### Phase B — classical bots and analysis
+6. RandomBot
+7. LegalFirstBot / FrontierRandomBot
+8. GreedyBot
+9. SearchBot
+10. tournament harness
+11. small-board analysis scripts
+12. benchmark position generation
+
+### Phase C — first learner
+13. GNN feature encoder
+14. GNN policy/value model
+15. masked training loop
+16. self-play with snapshot pool
+17. evaluation pipeline
+
+### Phase D — second learner
+18. CNN baseline encoder/model
+19. same training/eval harness
+20. GNN vs CNN comparison
+
+### Phase E — heterogeneous training
+21. mixed-opponent pool using both architectures
+22. cross-architecture robustness evaluation
+
+### Phase F — optional advanced methods
+23. PBT Step 1: hyperparameter variation only, if justified by Phase E plateau
+24. PBT Step 2: reward-shaping diversity, only if Step 1 runs and population still collapses to single style
+25. search-guided learning / AlphaZero-style upgrade if justified by learning plateau
+
+Do not skip the evaluation gates between phases.
+
+---
+
+## 18. File structure comparison: V1 vs V2
+
+This section explicitly compares the design **as file/module structure**, not only as content.
+
+### 18.1 V1 proposed structure
+
+V1 centered the project around the RL stack early:
+
+```text
+cycle_control/ai/
+    __init__.py
+    action_space.py
+    bot_interface.py
+    bots/
+        random_bot.py
+        greedy_bot.py
+    siege.py
+    features.py
+    env.py
+    network.py
+    ppo_selfplay.py
+    elo.py
+    tournament.py
+    cli.py
+```
+
+### 18.2 Problems with the V1 structure
+
+1. It was too flat.
+2. It implicitly prioritized RL over search and analysis.
+3. It gave no first-class home to:
+   - symmetry
+   - hashing
+   - simulation state
+   - search bots
+   - rule-analysis scripts
+   - multi-model support
+4. It centered the observation/network around a single model path too early.
+5. It treated siege logic like a near-core dependency rather than a heuristic subsystem.
+
+### 18.3 V2 structure
+
+V2 reorganizes the project by responsibility:
+
+```text
+cycle_control/ai/
+    __init__.py
+
+    core/
+        action_space.py
+        bot_interface.py
+        symmetry.py
+        hashing.py
+        simulation_state.py
+
+    heuristics/
+        eval.py
+        territory.py
+        greedy_bot.py
+        search_bot.py
+
+    training/
+        env.py
+        opponent_pool.py
+        selfplay.py
+        league.py
+        evaluate.py
+
+    models/
+        common.py
+        gnn.py
+        cnn.py
+
+    analysis/
+        small_board_search.py
+        opening_stats.py
+        benchmark_positions.py
+        rule_metrics.py
+
+    cli/
+        train_gnn.py
+        train_cnn.py
+        run_league.py
+        eval_model.py
+```
+
+### 18.4 Why the V2 structure is better
+
+#### A. `core/`
+V1 lacked a clean place for cross-cutting AI primitives.  
+V2 gives a proper home to:
+- action encoding
+- bot interface
+- symmetry logic
+- hashing
+- simulation state
+
+These are neither “just env” nor “just model” concerns.
+
+#### B. `heuristics/`
+V1 had GreedyBot but structurally underplayed heuristic/search tooling.  
+V2 elevates it.
+
+This makes room for:
+- evaluation functions
+- territory estimators
+- greedy bots
+- search bots
+
+#### C. `training/`
+V1 mixed env/network/training concerns too aggressively.  
+V2 separates orchestration from models.
+
+#### D. `models/`
+V1 implicitly assumed one main network path.  
+V2 explicitly supports model-family comparison.
+
+#### E. `analysis/`
+This is a major structural addition absent from V1.
+
+Research about the game itself needs a first-class place for:
+- small-board search studies
+- opening analysis
+- rule-balance metrics
+- curated benchmark states
+
+#### F. `cli/`
+V1 had a CLI mention but not enough structure.  
+V2 makes it explicit and task-oriented.
+
+### 18.5 What V1 had structurally that V2 initially risked losing
+
+These are now explicitly preserved:
+- action-space helper module
+- unified bot interface
+- tournament/evaluation utility
+- clear env module
+- ladder/league evaluation role
+
+### 18.6 Optional future V2 additions if the project grows
+
+If the project becomes large enough, add:
+
+```text
+    data/
+        selfplay_dataset.py
+        replay_buffer.py
+
+    search/
+        mcts.py
+        transposition.py
+        rollout_policy.py
+
+    experiments/
+        ablations.py
+        curriculum.py
+        pbt.py
+```
+
+Do **not** add these until they are justified.
+
+---
+
+## 19. Final V2 recommendation in one sentence
+
+Build search baselines first, treat GNN as the serious main learner, keep CNN as a comparison baseline, and use mixed-opponent training later for robustness rather than starting with direct mutual teaching or early PBT.
+
+---
+
+## 20. Practical acceptance criteria before calling V2 “working”
+
+The V2 pipeline is not considered ready until all of the following hold:
+
+1. Engine-side AI utilities exist:
+   - frontier legality
+   - cached neighbor counts
+   - simulation state
+   - symmetry support
+   - hashing
+
+2. Classical baselines exist:
+   - Random
+   - Greedy
+   - Search
+
+3. Small-board analysis exists and produces interpretable results.
+
+4. At least one neural learner beats GreedyBot reliably.
+
+5. Cross-evaluation exists:
+   - learned agent vs search baseline
+   - GNN vs CNN
+   - mixed-opponent robustness tests
+
+6. Research outputs about the game are reported separately from training curves.
+
+---
+
+## 21. Summary
+
+V2.2 is a structural extension of V2.1.1.
+
+It keeps everything V2 through V2.1.1 established:
+- unified bot interface
+- single-placement action decomposition
+- masked action space
+- staged implementation mindset
+- search-before-learning
+- GNN-first architecture
+- siege features demoted from mandatory observation
+- board size curriculum
+- cleaner agent/game-metrics separation
+- better file structure
+- CNN as comparison baseline
+- PBT late and conditional
+- reward-shaping diversity as a Phase 1 structural feature (from V2.1.1)
+
+V2.2 adds one structural extension:
+- **Combinatorial population design** (Section 13.0): the training population is defined by a product of three high-behavioral-impact axes — architecture (CNN/GNN), greedy bootstrap variant (G1/G2), and reward shaping profile (R0–R3) — giving 16 agents total. Hyperparameters are sampled randomly per agent, not enumerated as a discrete axis.
+- **Two greedy variants** (Section 8.2): Greedy_1 (cycle-focused) and Greedy_2 (territory-focused) replace the single GreedyBot. Both serve as bootstrap opponents and benchmark anchors. Validated against each other before the population grid is committed.
+- **Validation gate**: before running the full grid, verify each axis produces observable behavioral differences. Collapse any axis that does not.
+- **Compute scaling table**: 4-GPU minimum configuration specified, with axis-coverage guidance for smaller populations.
+
+The final recommendation in one sentence remains unchanged: build search baselines first, treat GNN as the serious main learner, keep CNN as a comparison baseline, and use multi-axis combinatorial population training to ensure the agent population covers the strategy space rather than converging to a single local optimum.

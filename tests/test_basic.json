@@ -1,0 +1,148 @@
+[
+  {
+    "name": "opening_placement_advances_to_white",
+    "description": "Black places one stone on the opening turn; control passes to White.",
+    "rules": {"board_radius": 2},
+    "moves": [
+      {"cmd": "assert_active_player", "expected": "black"},
+      {"cmd": "assert_turn_phase", "expected": "opening"},
+      {"cmd": "assert_turn_number", "expected": 1},
+      {"cmd": "place", "node": [0, 0, 0]},
+      {"cmd": "assert_active_player", "expected": "white"},
+      {"cmd": "assert_turn_phase", "expected": "normal_1"},
+      {"cmd": "assert_turn_number", "expected": 2},
+      {"cmd": "assert_node_state", "node": [0, 0, 0], "expected": "black"},
+      {"cmd": "assert_move_count", "expected": 1}
+    ]
+  },
+
+  {
+    "name": "consecutive_passes_end_game_as_draw",
+    "description": "Two consecutive full-turn passes end the game with 0-0 score (draw).",
+    "rules": {"board_radius": 2},
+    "moves": [
+      {"cmd": "pass"},
+      {"cmd": "assert_pass_counter", "expected": 1},
+      {"cmd": "assert_game_over", "expected": false},
+      {"cmd": "pass"},
+      {"cmd": "assert_game_over", "expected": true},
+      {"cmd": "assert_winner", "expected": "draw"}
+    ]
+  },
+
+  {
+    "name": "partial_pass_does_not_increment_counter",
+    "description": "White places 1/2 then passes; counter stays at 0.",
+    "rules": {"board_radius": 2},
+    "moves": [
+      {"cmd": "place", "node": [0, 0, 0]},
+      {"cmd": "place", "node": [1, 0, 0]},
+      {"cmd": "assert_turn_phase", "expected": "normal_2"},
+      {"cmd": "pass"},
+      {"cmd": "assert_pass_counter", "expected": 0},
+      {"cmd": "assert_active_player", "expected": "black"}
+    ]
+  },
+
+  {
+    "name": "sandbox_sets_up_6cycle",
+    "description": "Use sandbox to place all 6 R=1 triangles as Black; all 6 score.",
+    "rules": {"board_radius": 1},
+    "moves": [
+      {"cmd": "sandbox_place", "node": [0, 0, 0], "color": "black"},
+      {"cmd": "sandbox_place", "node": [-1, 0, 0], "color": "black"},
+      {"cmd": "sandbox_place", "node": [0, -1, 0], "color": "black"},
+      {"cmd": "sandbox_place", "node": [-1, 0, 1], "color": "black"},
+      {"cmd": "sandbox_place", "node": [0, -1, 1], "color": "black"},
+      {"cmd": "sandbox_place", "node": [-1, -1, 1], "color": "black"},
+      {"cmd": "assert_score", "player": "black", "expected": 6},
+      {"cmd": "assert_score", "player": "white", "expected": 0},
+      {"cmd": "assert_move_count", "expected": 0}
+    ]
+  },
+
+  {
+    "name": "undo_crosses_turn_boundary",
+    "description": "Undo after White's first placement crosses no turn boundary; turn_number stays at 2.",
+    "rules": {"board_radius": 2},
+    "moves": [
+      {"cmd": "place", "node": [0, 0, 0]},
+      {"cmd": "place", "node": [1, 0, 0]},
+      {"cmd": "assert_turn_number", "expected": 2},
+      {"cmd": "assert_turn_phase", "expected": "normal_2"},
+      {"cmd": "undo"},
+      {"cmd": "assert_turn_number", "expected": 2},
+      {"cmd": "assert_turn_phase", "expected": "normal_1"}
+    ]
+  },
+
+  {
+    "name": "undo_back_to_opening",
+    "description": "Undo Black's opening placement returns to turn 1, opening phase.",
+    "rules": {"board_radius": 2},
+    "moves": [
+      {"cmd": "place", "node": [0, 0, 0]},
+      {"cmd": "assert_turn_number", "expected": 2},
+      {"cmd": "undo"},
+      {"cmd": "assert_turn_number", "expected": 1},
+      {"cmd": "assert_turn_phase", "expected": "opening"},
+      {"cmd": "assert_active_player", "expected": "black"},
+      {"cmd": "assert_node_state", "node": [0, 0, 0], "expected": "empty"},
+      {"cmd": "assert_move_count", "expected": 0}
+    ]
+  },
+
+  {
+    "name": "truncation_by_supply",
+    "description": "With stones_per_player=2, Black's second turn is truncated to 1 placement.",
+    "rules": {
+      "board_radius": 2,
+      "stones_per_player": 2,
+      "end_on_all_stones_placed": true
+    },
+    "moves": [
+      {"cmd": "place", "node": [0, 0, 0]},
+      {"cmd": "assert_stones_remaining", "player": "black", "expected": 1},
+      {"cmd": "place", "node": [1, 0, 0]},
+      {"cmd": "place", "node": [-1, 0, 0]},
+      {"cmd": "assert_active_player", "expected": "black"},
+      {"cmd": "assert_turn_phase", "expected": "truncated_1"}
+    ]
+  },
+
+  {
+    "name": "mirror_adjacency_enables_4_cycle",
+    "description": "Under mirror adjacency, 4 stones can form a scoring cycle.",
+    "rules": {"board_radius": 2, "mirror_adjacency": true},
+    "moves": [
+      {"cmd": "sandbox_place", "node": [0, 0, 0], "color": "black"},
+      {"cmd": "sandbox_place", "node": [0, 0, 1], "color": "black"},
+      {"cmd": "sandbox_place", "node": [0, 1, 0], "color": "black"},
+      {"cmd": "sandbox_place", "node": [-1, 0, 1], "color": "black"},
+      {"cmd": "assert_score", "player": "black", "expected": 4}
+    ]
+  },
+
+  {
+    "name": "neutrality_blocks_parachute",
+    "description": "Black cannot place at a cell where White has more neighbors.",
+    "rules": {"board_radius": 2, "neutrality_rule": true},
+    "moves": [
+      {"cmd": "sandbox_place", "node": [-1, 0, 1], "color": "white"},
+      {"cmd": "sandbox_place", "node": [0, -1, 1], "color": "white"},
+      {"cmd": "assert_active_player", "expected": "black"}
+    ]
+  },
+
+  {
+    "name": "partial_credit_k3_scores_3_path",
+    "description": "A 3-node path scores 0 without partial credit; scores 3 with K=3.",
+    "rules": {"board_radius": 2, "partial_credit_k": 3},
+    "moves": [
+      {"cmd": "sandbox_place", "node": [0, 0, 0], "color": "black"},
+      {"cmd": "sandbox_place", "node": [0, 0, 1], "color": "black"},
+      {"cmd": "sandbox_place", "node": [0, 1, 0], "color": "black"},
+      {"cmd": "assert_score", "player": "black", "expected": 3}
+    ]
+  }
+]
